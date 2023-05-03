@@ -3,9 +3,11 @@ resource "aws_launch_template" "main" {
   name = "${var.component}-${var.env}"
 
   # our instances need to fetch parameters from aws_parameter_store
- // iam_instance_profile {
- //   name = "test"
- //  }
+  # SPECIAL # SPECIAL # SPECIAL # SPECIAL # SPECIAL
+  # we need to connect the instance_profile created in iam.tf
+  iam_instance_profile {
+    name = aws_iam_instance_profile.main.name
+   }
 
   image_id = data.aws_ami.ami.image_id
 
@@ -14,6 +16,10 @@ resource "aws_launch_template" "main" {
   }
 
   instance_type = var.instance_type
+
+  # SPECIAL # SPECIAL # SPECIAL # SPECIAL # SPECIAL
+  # we need to connect the security_group created to aws_launch_template
+  vpc_security_group_ids = [aws_security_group.main.id]
 
 
   # we give placements through subnets
@@ -60,3 +66,43 @@ resource "aws_autoscaling_group" "bar" {
   }
 }
 
+# we are creating this security group for the servers running in private_subnets
+# so that the workstation/bastion_node will be allowed to access all the servers in private_subnets
+resource "aws_security_group" "main" {
+  name        = "${var.component}-${var.env}"
+  description = "${var.component}-${var.env}"
+  vpc_id      = var.vpc_id    # vpc_id is comming from tf-module-vpc >> output_block
+
+  ingress {
+    description      = "SSH"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = var.bastion_cidr
+  }
+
+
+  # We need to open the Application port & we also need too tell to whom that port is opened
+  # (i.e who is allowed to use that application port)
+  # I.e shat port to open & to whom to open
+  # Example for CTALOGUE we will open port 8080 ONLY WITHIN the APP_SUBNET
+  # So that the following components (i.e to USER / CART / SHIPPING / PAYMENT) can use CATALOGUE.
+  # And frontend also is necessarily need not be accessing the catalogue, i.e not to FRONTEND, because frontend belongs to web_subnet
+  ingress {
+    description      = "APP"
+    from_port        = var.port
+    to_port          = var.port
+    protocol         = "tcp"
+    cidr_blocks      = var.allow_app_to  # we want cidr number not subnet_id
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags,
+    { Name = "${var.component}-${var.env}-security-group" })
+}
