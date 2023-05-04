@@ -64,6 +64,9 @@ resource "aws_autoscaling_group" "bar" {
     propagate_at_launch = false
     value               = "${var.component}-${var.env}"
   }
+
+  # attaching target group to Auto_Scaling_Group
+  target_group_arns = [aws_lb_target_group.main.arn]
 }
 
 # we are creating this security group for the servers running in private_subnets
@@ -105,4 +108,50 @@ resource "aws_security_group" "main" {
 
   tags = merge(var.tags,
     { Name = "${var.component}-${var.env}-security-group" })
+}
+
+# creating Target Group
+resource "aws_lb_target_group" "main" {
+  name     = "${var.component}-${var.env}-lb-tg"
+  port     = var.port
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+  health_check {
+    enabled = true
+    healthy_threshold = 2
+    unhealthy_threshold = 5
+    interval = 5
+    timeout = 4
+  }
+  tags = merge(var.tags,
+    { Name = "${var.component}-${var.env}-lb-tg" })
+}
+
+resource "aws_route53_record" "main" {
+  zone_id = data.aws_route53_zone.domain.zone_id  # input >> dns_domain = "nellore.online"
+  name    = local.dns_name
+  type    = "CNAME"
+  ttl     = 30
+  records = [var.alb_dns_domain]  # input >> alb = "public"
+}
+
+resource "aws_lb_listener_rule" "listener_rule" {
+  listener_arn = var.listener_arn # from output >> module.alb
+
+  priority     = var.listener_priority   # order of listener >> from input "listener_priority = 10"
+  # to process the order of listener_RULES in order one after the other based on Listener_Priority_number
+  # same Listener_Priority_number can be alloted to Public_LB & Private_LB
+  # Listener_Priority_number order does not matter for us
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.main.arn
+  }
+
+  # any request is coming from cart-dev-nellore.online >> action is : forward to target_group >> target_group_arn = aws_lb_target_group.main.arn
+  condition {
+    host_header {
+      values = ["local.dns_name"]   # dns_name
+    }
+  }
 }
